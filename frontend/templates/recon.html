@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Recon{% endblock %}
+{% block page_title %}🔍 Target Reconnaissance{% endblock %}
+
+{% block content %}
+<div class="recon-container">
+    <div class="panel">
+        <div class="panel-header"><h3>Target Scanner</h3></div>
+        <div class="recon-form">
+            <input type="text" id="recon-url" class="input-dark input-lg" placeholder="https://target.com">
+            <div class="checkbox-grid" style="margin: 15px 0;">
+                <label class="checkbox-label"><input type="checkbox" value="fingerprint" class="scan-check" checked> Fingerprint</label>
+                <label class="checkbox-label"><input type="checkbox" value="waf" class="scan-check" checked> WAF Detection</label>
+                <label class="checkbox-label"><input type="checkbox" value="cms" class="scan-check" checked> CMS Detection</label>
+                <label class="checkbox-label"><input type="checkbox" value="ports" class="scan-check"> Port Scan</label>
+            </div>
+            <button onclick="runScan()" class="btn btn-primary" id="scan-btn">🔍 Scan Target</button>
+        </div>
+    </div>
+
+    <div id="scan-loading" style="display:none;" class="loading-spinner">
+        <div class="spinner"></div><p>Scanning target...</p>
+    </div>
+
+    <div id="scan-results" style="display:none;">
+        <!-- Fingerprint -->
+        <div class="panel" id="res-fingerprint" style="display:none;">
+            <div class="panel-header"><h3>🖐️ Fingerprint</h3></div>
+            <div class="result-grid" id="fingerprint-data"></div>
+        </div>
+
+        <!-- WAF -->
+        <div class="panel" id="res-waf" style="display:none;">
+            <div class="panel-header"><h3>🛡️ WAF Detection</h3></div>
+            <div id="waf-data"></div>
+        </div>
+
+        <!-- CMS -->
+        <div class="panel" id="res-cms" style="display:none;">
+            <div class="panel-header"><h3>📦 CMS Detection</h3></div>
+            <div id="cms-data"></div>
+        </div>
+
+        <!-- Ports -->
+        <div class="panel" id="res-ports" style="display:none;">
+            <div class="panel-header"><h3>🔌 Open Ports</h3></div>
+            <table class="data-table" id="ports-table">
+                <thead><tr><th>Port</th><th>State</th><th>Service</th><th>Banner</th></tr></thead>
+                <tbody id="ports-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function runScan() {
+    const url = document.getElementById('recon-url').value.trim();
+    if(!url) return;
+    const types = [...document.querySelectorAll('.scan-check:checked')].map(e => e.value);
+    if(!types.length) return;
+
+    document.getElementById('scan-btn').disabled = true;
+    document.getElementById('scan-btn').textContent = '⏳ Scanning...';
+    document.getElementById('scan-loading').style.display = 'flex';
+    document.getElementById('scan-results').style.display = 'none';
+
+    fetch('/dashboard/recon/scan', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url, scan_types: types})
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('scan-loading').style.display = 'none';
+        document.getElementById('scan-results').style.display = 'block';
+        document.getElementById('scan-btn').disabled = false;
+        document.getElementById('scan-btn').textContent = '🔍 Scan Target';
+
+        // Fingerprint
+        if(data.fingerprint) {
+            document.getElementById('res-fingerprint').style.display = 'block';
+            const fp = data.fingerprint;
+            let html = '';
+            const fields = [
+                ['Server', fp.server_software], ['Powered By', fp.powered_by],
+                ['PHP Version', fp.php_version], ['OS Guess', fp.os_guess],
+                ['Response Time', fp.response_time_ms + 'ms'],
+                ['Technologies', (fp.technologies||[]).join(', ')],
+                ['HTTP Methods', (fp.http_methods||[]).join(', ')],
+                ['Common Files', (fp.common_files||[]).join(', ') || 'None found'],
+            ];
+            fields.forEach(([k,v]) => {
+                if(v) html += `<div class="result-item"><span class="label">${k}:</span> <span>${v}</span></div>`;
+            });
+            // Security headers
+            if(fp.security_headers) {
+                html += '<div class="result-item"><span class="label">Security Headers:</span></div>';
+                Object.entries(fp.security_headers).forEach(([k,v]) => {
+                    html += `<div class="result-item sub"><span class="label">${k}:</span> <span>${v}</span></div>`;
+                });
+            }
+            document.getElementById('fingerprint-data').innerHTML = html;
+        }
+
+        // WAF
+        if(data.waf) {
+            document.getElementById('res-waf').style.display = 'block';
+            const w = data.waf;
+            let html = w.detected
+                ? `<div class="alert alert-warning">⚠️ WAF Detected: <b>${w.waf_name}</b> (${(w.confidence*100).toFixed(0)}% confidence)</div>
+                   <p>${w.details}</p>`
+                : `<div class="alert alert-success">✅ No WAF detected</div>`;
+            if(w.all_detected && w.all_detected.length > 1) {
+                html += '<h4>All Detections:</h4><ul>';
+                w.all_detected.forEach(d => {
+                    html += `<li>${d.waf_name} — ${(d.confidence*100).toFixed(0)}%</li>`;
+                });
+                html += '</ul>';
+            }
+            document.getElementById('waf-data').innerHTML = html;
+        }
+
+        // CMS
+        if(data.cms) {
+            document.getElementById('res-cms').style.display = 'block';
+            const c = data.cms;
+            let html = c.cms
+                ? `<div class="alert alert-info">📦 CMS: <b>${c.cms}</b> ${c.version ? 'v' + c.version : ''} (${(c.confidence*100).toFixed(0)}%)</div>`
+                : `<div class="alert alert-info">No CMS detected</div>`;
+            document.getElementById('cms-data').innerHTML = html;
+        }
+
+        // Ports
+        if(data.ports) {
+            document.getElementById('res-ports').style.display = 'block';
+            let html = '';
+            Object.entries(data.ports).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([port, info]) => {
+                html += `<tr><td>${port}</td><td class="status-open">${info.state}</td>
+                    <td>${info.service}</td><td class="banner-cell">${info.banner || '—'}</td></tr>`;
+            });
+            document.getElementById('ports-body').innerHTML = html || '<tr><td colspan="4">No open ports found</td></tr>';
+        }
+
+        showNotification('Scan complete');
+    })
+    .catch(err => {
+        document.getElementById('scan-loading').style.display = 'none';
+        document.getElementById('scan-btn').disabled = false;
+        document.getElementById('scan-btn').textContent = '🔍 Scan Target';
+        showNotification('Scan failed: ' + err.message);
+    });
+}
+</script>
+{% endblock %}

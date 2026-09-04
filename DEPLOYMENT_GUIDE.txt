@@ -1,0 +1,384 @@
+================================================================================
+         SHADOW C2 — STEP-BY-STEP DEPLOYMENT GUIDE (Ubuntu Server)
+================================================================================
+
+PREREQUISITES
+─────────────
+  • Ubuntu 20.04 / 22.04 / 24.04 (or Debian-based)
+  • Root or sudo access
+  • Python 3.10+
+  • Open ports: 8443 (HTTPS), 5353 (DNS tunnel, optional)
+  • Minimum 1GB RAM, 10GB disk
+
+
+================================================================================
+STEP 1: TRANSFER FILES TO YOUR SERVER
+================================================================================
+
+Option A — Git clone (if hosted on a repo):
+
+    ssh root@YOUR_SERVER_IP
+    cd /opt
+    git clone YOUR_REPO_URL shadow-c2
+    cd shadow-c2
+
+Option B — SCP from your local machine:
+
+    scp -r "C:\Users\Shambhuraje Thorat\Desktop\Projects\Final\*" root@YOUR_SERVER_IP:/opt/shadow-c2/
+
+Option C — ZIP and upload:
+
+    # On your PC: zip the Final folder
+    # Upload via SCP:
+    scp shadow-c2.zip root@YOUR_SERVER_IP:/opt/
+    # On server:
+    cd /opt
+    unzip shadow-c2.zip -d shadow-c2
+    cd shadow-c2
+
+
+================================================================================
+STEP 2: INSTALL SYSTEM DEPENDENCIES
+================================================================================
+
+    sudo apt update && sudo apt upgrade -y
+    sudo apt install -y python3 python3-pip python3-venv openssl curl
+
+
+================================================================================
+STEP 3: CREATE PYTHON VIRTUAL ENVIRONMENT
+================================================================================
+
+    cd /opt/shadow-c2
+    python3 -m venv venv
+    source venv/bin/activate
+
+    # Verify Python is from venv:
+    which python
+    # Should show: /opt/shadow-c2/venv/bin/python
+
+
+================================================================================
+STEP 4: INSTALL PYTHON PACKAGES
+================================================================================
+
+    pip install --upgrade pip
+    pip install -r requirements.txt
+
+    # Verify:
+    pip list
+    # Should show: flask, flask-socketio, cryptography, bcrypt, gevent, etc.
+
+
+================================================================================
+STEP 5: CREATE REQUIRED DIRECTORIES
+================================================================================
+
+    mkdir -p data/db
+    mkdir -p data/downloads
+    mkdir -p data/logs
+    mkdir -p data/ssl
+    mkdir -p payloads/downloads
+    mkdir -p payloads/uploads
+    mkdir -p logs
+    mkdir -p ssl
+
+
+================================================================================
+STEP 6: GENERATE SSL CERTIFICATE
+================================================================================
+
+    openssl req -x509 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -keyout ssl/server.key \
+        -out ssl/server.crt \
+        -days 365 -nodes \
+        -subj "/CN=shadowc2.local"
+
+    # Verify cert was created:
+    ls -la ssl/
+    # Should show: server.crt  server.key
+
+
+================================================================================
+STEP 7: CONFIGURE ENVIRONMENT VARIABLES
+================================================================================
+
+    nano .env
+
+    # Paste the following (edit values as needed):
+
+    ────────────────── .env contents ──────────────────
+    export SC2_HOST=0.0.0.0
+    export SC2_PORT=8443
+    export SC2_USERNAME=operator
+    export SC2_PASSWORD=YOUR_STRONG_PASSWORD_HERE
+    export SC2_SECRET_KEY=$(python3 -c "import os; print(os.urandom(32).hex())")
+    export SC2_DEBUG=false
+    export SC2_DNS_ENABLED=true
+    export SC2_DNS_PORT=5353
+    export SC2_DNS_DOMAIN=c2.yourdomain.com
+    export SC2_ICMP_ENABLED=false
+    export SC2_LOG_LEVEL=INFO
+    # Optional — Discord C2:
+    # export SC2_DISCORD_ENABLED=true
+    # export SC2_DISCORD_TOKEN=your_bot_token
+    # export SC2_DISCORD_CHANNEL=your_channel_id
+    # Optional — Telegram C2:
+    # export SC2_TELEGRAM_ENABLED=true
+    # export SC2_TELEGRAM_TOKEN=your_bot_token
+    # export SC2_TELEGRAM_CHAT=your_chat_id
+    ──────────────────────────────────────────────────
+
+    # Save: Ctrl+O, Enter, Ctrl+X
+
+    # Load the variables:
+    source .env
+
+
+================================================================================
+STEP 8: OPEN FIREWALL PORTS
+================================================================================
+
+    # If using UFW:
+    sudo ufw allow 8443/tcp      # HTTPS C2 + Dashboard
+    sudo ufw allow 5353/udp      # DNS tunnel (optional)
+    sudo ufw reload
+
+    # If using iptables:
+    sudo iptables -A INPUT -p tcp --dport 8443 -j ACCEPT
+    sudo iptables -A INPUT -p udp --dport 5353 -j ACCEPT
+
+    # Verify:
+    sudo ufw status
+
+
+================================================================================
+STEP 9: TEST RUN (FOREGROUND)
+================================================================================
+
+    cd /opt/shadow-c2
+    source venv/bin/activate
+    source .env
+    python -m server.app
+
+    # You should see:
+    #
+    #    _____ __              __                 ______ ___
+    #   / ___// /_  ____ _____/ /___ _      __   / ____/|__ \
+    #   \__ \/ __ \/ __ `/ __  / __ \ | /| / /  / /     __/ /
+    #  ___/ / / / / /_/ / /_/ / /_/ / |/ |/ /  / /___  / __/
+    # /____/_/ /_/\__,_/\__,_/\____/|__/|__/   \____/ /____/
+    #
+    #  [*] Server:     https://0.0.0.0:8443
+    #  [*] Dashboard:  https://localhost:8443/dashboard/
+    #  ...
+
+    # Test in browser:
+    # https://YOUR_SERVER_IP:8443/dashboard/
+    # Accept the self-signed cert warning
+    # Login with your username/password
+
+    # Stop with: Ctrl+C
+
+
+================================================================================
+STEP 10: SET UP AS SYSTEMD SERVICE (RUN ON BOOT)
+================================================================================
+
+    sudo nano /etc/systemd/system/shadow-c2.service
+
+    # Paste this:
+    ────────────────── service file ──────────────────
+    [Unit]
+    Description=Shadow C2 Command Center
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=root
+    WorkingDirectory=/opt/shadow-c2
+    EnvironmentFile=/opt/shadow-c2/.env
+    ExecStart=/opt/shadow-c2/venv/bin/python -m server.app
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+    ──────────────────────────────────────────────────
+
+    # Save and enable:
+    sudo systemctl daemon-reload
+    sudo systemctl enable shadow-c2
+    sudo systemctl start shadow-c2
+
+    # Check status:
+    sudo systemctl status shadow-c2
+
+    # View logs:
+    sudo journalctl -u shadow-c2 -f
+
+
+================================================================================
+STEP 11: VERIFY EVERYTHING IS WORKING
+================================================================================
+
+    1. Open browser:
+       https://YOUR_SERVER_IP:8443/dashboard/
+
+    2. Accept self-signed certificate warning
+
+    3. Login:
+       Username: operator  (or whatever you set in SC2_USERNAME)
+       Password: (whatever you set in SC2_PASSWORD)
+
+    4. You should see the dark-themed dashboard with:
+       - Stats cards (all zeros initially)
+       - World map
+       - Activity log
+
+    5. Test payload generation:
+       - Click "Generator" in sidebar
+       - Select payload type (e.g., php_raw)
+       - Set C2 URL to: https://YOUR_SERVER_IP:8443
+       - Click "Generate Payload"
+       - Download the generated file
+
+    6. Test recon:
+       - Click "Recon" in sidebar
+       - Enter a target URL
+       - Check Fingerprint + WAF + CMS
+       - Click "Scan Target"
+
+    7. Check API is responding:
+       curl -k https://localhost:8443/api/beacon -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"uuid":"test-123","timestamp":0}'
+       # Should return: {"tasks":[]}
+
+
+================================================================================
+STEP 12: OPTIONAL — ENABLE ICMP CHANNEL (NEEDS ROOT)
+================================================================================
+
+    # Edit .env:
+    export SC2_ICMP_ENABLED=true
+
+    # Restart:
+    sudo systemctl restart shadow-c2
+
+    # ICMP requires root — the service already runs as root
+
+
+================================================================================
+STEP 13: OPTIONAL — ENABLE SOCIAL MEDIA C2
+================================================================================
+
+    DISCORD:
+    1. Go to https://discord.com/developers/applications
+    2. Create a new application → Bot tab → copy token
+    3. Create a private server + channel, copy channel ID
+    4. Edit .env:
+       export SC2_DISCORD_ENABLED=true
+       export SC2_DISCORD_TOKEN=your_bot_token_here
+       export SC2_DISCORD_CHANNEL=your_channel_id_here
+    5. Restart: sudo systemctl restart shadow-c2
+
+    TELEGRAM:
+    1. Message @BotFather on Telegram → /newbot
+    2. Copy the bot token
+    3. Start a chat with your bot, get chat ID via:
+       curl https://api.telegram.org/botYOUR_TOKEN/getUpdates
+    4. Edit .env:
+       export SC2_TELEGRAM_ENABLED=true
+       export SC2_TELEGRAM_TOKEN=your_bot_token_here
+       export SC2_TELEGRAM_CHAT=your_chat_id_here
+    5. Restart: sudo systemctl restart shadow-c2
+
+
+================================================================================
+STEP 14: OPTIONAL — USE A REAL DOMAIN + LET'S ENCRYPT SSL
+================================================================================
+
+    # Point your domain's A record to your server IP
+
+    # Install certbot:
+    sudo apt install certbot -y
+
+    # Get cert (stop shadow-c2 first if using port 443):
+    sudo certbot certonly --standalone -d c2.yourdomain.com
+
+    # Copy certs:
+    sudo cp /etc/letsencrypt/live/c2.yourdomain.com/fullchain.pem /opt/shadow-c2/ssl/server.crt
+    sudo cp /etc/letsencrypt/live/c2.yourdomain.com/privkey.pem /opt/shadow-c2/ssl/server.key
+
+    # Restart:
+    sudo systemctl restart shadow-c2
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: "Address already in use"
+    sudo lsof -i :8443
+    sudo kill -9 <PID>
+
+Problem: "Permission denied" on port 5353
+    # Use a port above 1024, or run as root
+
+Problem: Dashboard won't load
+    # Check logs:
+    sudo journalctl -u shadow-c2 --since "5 minutes ago"
+    # Or:
+    tail -f /opt/shadow-c2/logs/shadow_c2.log
+
+Problem: SSL certificate error in browser
+    # Expected with self-signed cert — click "Advanced" → "Proceed"
+    # Or use Let's Encrypt (Step 14)
+
+Problem: Victims not connecting
+    # Verify firewall allows port 8443
+    # Verify C2 URL in generated payload matches your server IP/domain
+    # Check victim can reach your server: curl -k https://YOUR_IP:8443/
+
+Problem: DNS channel not working
+    # Verify port 5353 is open (UDP)
+    # Test: dig @YOUR_IP -p 5353 test.c2.yourdomain.com TXT
+
+
+================================================================================
+QUICK REFERENCE — USEFUL COMMANDS
+================================================================================
+
+    # Start/stop/restart:
+    sudo systemctl start shadow-c2
+    sudo systemctl stop shadow-c2
+    sudo systemctl restart shadow-c2
+
+    # View logs:
+    sudo journalctl -u shadow-c2 -f
+    tail -f /opt/shadow-c2/logs/shadow_c2.log
+
+    # Manual run (foreground, for debugging):
+    cd /opt/shadow-c2
+    source venv/bin/activate
+    source .env
+    python -m server.app
+
+    # Check open ports:
+    sudo ss -tlnp | grep -E "8443|5353"
+
+    # Database location:
+    /opt/shadow-c2/data/shadow_c2.db
+
+    # Generated payloads:
+    /opt/shadow-c2/payloads/
+
+    # Downloaded files from victims:
+    /opt/shadow-c2/payloads/downloads/
+
+
+================================================================================
+                          DEPLOYMENT COMPLETE
+================================================================================

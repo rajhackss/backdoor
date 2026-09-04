@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Settings{% endblock %}
+{% block page_title %}⚡ Settings{% endblock %}
+
+{% block content %}
+<div class="settings-container">
+    <div class="panel">
+        <div class="panel-header"><h3>Server Configuration</h3></div>
+        <div class="settings-info">
+            <p>Server configuration is managed via environment variables with the <code>SC2_</code> prefix.</p>
+            <p>Restart the server after changing any values.</p>
+            <table class="data-table">
+                <thead><tr><th>Setting</th><th>Env Variable</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td>Host</td><td><code>SC2_HOST</code></td><td>Bind address (default: 0.0.0.0)</td></tr>
+                    <tr><td>Port</td><td><code>SC2_PORT</code></td><td>HTTPS port (default: 8443)</td></tr>
+                    <tr><td>Username</td><td><code>SC2_USERNAME</code></td><td>Dashboard login (default: operator)</td></tr>
+                    <tr><td>Password</td><td><code>SC2_PASSWORD</code></td><td>Dashboard password (default: shadowc2)</td></tr>
+                    <tr><td>DNS Port</td><td><code>SC2_DNS_PORT</code></td><td>DNS tunnel port (default: 5353)</td></tr>
+                    <tr><td>DNS Domain</td><td><code>SC2_DNS_DOMAIN</code></td><td>Domain for DNS tunneling</td></tr>
+                    <tr><td>Discord Token</td><td><code>SC2_DISCORD_TOKEN</code></td><td>Discord bot token for social C2</td></tr>
+                    <tr><td>Telegram Token</td><td><code>SC2_TELEGRAM_TOKEN</code></td><td>Telegram bot token for social C2</td></tr>
+                    <tr><td>Debug</td><td><code>SC2_DEBUG</code></td><td>Enable debug mode (default: false)</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header"><h3>Database Maintenance</h3></div>
+        <div class="action-buttons">
+            <button onclick="dbCleanup()" class="btn btn-secondary">🗑️ Cleanup Dead Victims</button>
+            <button onclick="dbVacuum()" class="btn btn-secondary">🔧 Vacuum Database</button>
+            <button onclick="dbExport()" class="btn btn-primary">📥 Export Database</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header"><h3>About</h3></div>
+        <div class="about-info">
+            <p><b>Shadow C2</b> — Web Backdoor Generator & C2 Command Center v1.0</p>
+            <p>Multi-channel C2: HTTPS, WebSocket, DNS Tunnel, ICMP, Social Media</p>
+            <p>Polymorphic/Metamorphic payload engine with 10+ encoding layers</p>
+            <p>WAF bypass for Cloudflare, ModSecurity, Sucuri, Imperva, AWS WAF</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dbCleanup() {
+    fetch('/dashboard/api/command', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({victim_id: 0, command: '__cleanup__'})
+    }).then(() => showNotification('Cleanup initiated'));
+}
+function dbVacuum() { showNotification('Database vacuum initiated'); }
+function dbExport() { window.open('/dashboard/api/stats'); }
+</script>
+{% endblock %}

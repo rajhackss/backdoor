@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Shadow C2 — Victims{% endblock %}
+{% block page_title %}🎯 Victims{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <div class="toolbar-left">
+        <input type="text" id="victim-search" class="input-dark" placeholder="Search victims..." oninput="filterVictims()">
+        <select id="status-filter" class="input-dark" onchange="filterVictims()">
+            <option value="">All Status</option>
+            <option value="active">Active</option>
+            <option value="dormant">Dormant</option>
+            <option value="dead">Dead</option>
+        </select>
+    </div>
+    <div class="toolbar-right">
+        <span class="victim-count" id="victim-count">{{ victims|length }} victims</span>
+    </div>
+</div>
+
+<div class="table-container">
+    <table class="data-table" id="victims-table">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>UUID</th>
+                <th>IP Address</th>
+                <th>Hostname</th>
+                <th>OS</th>
+                <th>Country</th>
+                <th>CMS</th>
+                <th>WAF</th>
+                <th>Last Seen</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="victims-body">
+            {% for v in victims %}
+            <tr class="victim-row" data-status="{{ v.status }}" data-id="{{ v.id }}">
+                <td><span class="status-dot {{ v.status }}"></span> {{ v.status }}</td>
+                <td class="uuid-cell" title="{{ v.uuid }}">{{ v.uuid[:8] }}...</td>
+                <td>{{ v.ip }}</td>
+                <td>{{ v.hostname }}</td>
+                <td>{{ v.os }}</td>
+                <td>{{ v.country }} {{ v.city }}</td>
+                <td>{{ v.cms_detected or '—' }}</td>
+                <td>{{ v.waf_detected or '—' }}</td>
+                <td class="time-cell">{{ v.last_seen }}</td>
+                <td class="actions-cell">
+                    <a href="/dashboard/terminal/{{ v.id }}" class="btn btn-sm btn-primary" title="Terminal">💻</a>
+                    <a href="/dashboard/files/{{ v.id }}" class="btn btn-sm btn-secondary" title="Files">📁</a>
+                    <button onclick="deleteVictim({{ v.id }})" class="btn btn-sm btn-danger" title="Delete">🗑️</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterVictims() {
+    const search = document.getElementById('victim-search').value.toLowerCase();
+    const status = document.getElementById('status-filter').value;
+    const rows = document.querySelectorAll('.victim-row');
+    let count = 0;
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const rowStatus = row.dataset.status;
+        const matchSearch = !search || text.includes(search);
+        const matchStatus = !status || rowStatus === status;
+        row.style.display = (matchSearch && matchStatus) ? '' : 'none';
+        if(matchSearch && matchStatus) count++;
+    });
+    document.getElementById('victim-count').textContent = `${count} victims`;
+}
+
+function deleteVictim(id) {
+    if(!confirm('Delete this victim?')) return;
+    fetch(`/dashboard/api/victim/${id}`, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(() => {
+            document.querySelector(`tr[data-id="${id}"]`).remove();
+            showNotification('Victim deleted');
+        });
+}
+
+// Real-time new victim
+socket.on('new_victim', (data) => {
+    location.reload(); // Simple refresh for new victims
+});
+</script>
+{% endblock %}
